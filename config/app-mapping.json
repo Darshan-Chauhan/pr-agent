@@ -1,0 +1,140 @@
+{
+  "$schema": "./app-mapping-schema.json",
+  "description": "Maps GitHub repositories/paths to local development apps and their URLs",
+  "mappings": [
+    {
+      "id": "qei-dashboard",
+      "name": "QEI Dashboard",
+      "description": "Quality Engineering Intelligence Dashboard",
+      "repository": {
+        "owner": "browserstack",
+        "name": "frontend",
+        "paths": [
+          "apps/quality-dashboard/**",
+          "packages/design-stack/**",
+          "packages/hooks/**"
+        ]
+      },
+      "localApp": {
+        "baseUrl": "http://localhost:3000",
+        "healthCheck": "/api/health",
+        "startCommand": "cd ../frontend && pnpm dev --filter quality-dashboard",
+        "buildPath": "../frontend/apps/quality-dashboard",
+        "configFile": "../frontend/apps/quality-dashboard/package.json"
+      },
+      "testConfig": {
+        "routes": [
+          { "path": "/", "name": "Dashboard Home", "critical": true },
+          { "path": "/analytics", "name": "Analytics", "critical": true },
+          { "path": "/reports", "name": "Reports", "critical": false },
+          { "path": "/settings", "name": "Settings", "critical": false }
+        ],
+        "components": [
+          { "name": "Dashboard", "selector": "[data-testid='dashboard']" },
+          { "name": "Charts", "selector": "[data-testid='chart-container']" },
+          { "name": "DataTable", "selector": "[data-testid='data-table']" }
+        ]
+      }
+    },
+    {
+      "id": "integrate-app",
+      "name": "Integrate Application",
+      "description": "BrowserStack Integration Platform",
+      "repository": {
+        "owner": "browserstack",
+        "name": "frontend",
+        "paths": ["apps/integrate/**"]
+      },
+      "localApp": {
+        "baseUrl": "http://localhost:3001",
+        "healthCheck": "/api/status",
+        "startCommand": "cd ../frontend && pnpm dev --filter integrate",
+        "buildPath": "../frontend/apps/integrate",
+        "configFile": "../frontend/apps/integrate/package.json"
+      },
+      "testConfig": {
+        "routes": [
+          { "path": "/", "name": "Integration Hub", "critical": true },
+          {
+            "path": "/integrations",
+            "name": "Integrations List",
+            "critical": true
+          },
+          { "path": "/setup", "name": "Setup Wizard", "critical": true }
+        ]
+      }
+    },
+    {
+      "id": "live-app",
+      "name": "Live Testing Application",
+      "description": "BrowserStack Live Testing Platform",
+      "repository": {
+        "owner": "browserstack",
+        "name": "frontend",
+        "paths": ["apps/live-revamp/**"]
+      },
+      "localApp": {
+        "baseUrl": "http://localhost:3002",
+        "healthCheck": "/health",
+        "startCommand": "cd ../frontend && pnpm dev --filter live-revamp",
+        "buildPath": "../frontend/apps/live-revamp"
+      }
+    },
+    {
+      "id": "test-management",
+      "name": "Test Management Application",
+      "description": "BrowserStack Test Case Management Platform",
+      "repository": {
+        "owner": "browserstack",
+        "name": "frontend",
+        "paths": [
+          "apps/tcm/**",
+          "apps/tm-jira-onprem/**",
+          "apps/tm-jira-forge-app/**",
+          "packages/tm-shared/**"
+        ]
+      },
+      "localApp": {
+        "baseUrl": "http://localhost:5173",
+        "healthCheck": "/api/health",
+        "startCommand": "cd ../frontend && pnpm dev --filter tcm",
+        "buildPath": "../frontend/apps/tcm",
+        "configFile": "../frontend/apps/tcm/package.json"
+      },
+      "testConfig": {
+        "routes": [
+          { "path": "/", "name": "Test Management Home", "critical": true },
+          { "path": "/projects", "name": "Projects", "critical": true },
+          { "path": "/test-cases", "name": "Test Cases", "critical": true },
+          { "path": "/test-runs", "name": "Test Runs", "critical": true },
+          { "path": "/reports", "name": "Reports", "critical": false },
+          { "path": "/settings", "name": "Settings", "critical": false }
+        ],
+        "components": [
+          { "name": "ProjectList", "selector": "[data-testid='project-list']" },
+          {
+            "name": "TestCaseGrid",
+            "selector": "[data-testid='test-case-grid']"
+          },
+          {
+            "name": "TestRunDashboard",
+            "selector": "[data-testid='test-run-dashboard']"
+          },
+          {
+            "name": "Navigation",
+            "selector": "[data-testid='main-navigation']"
+          }
+        ]
+      }
+    }
+  ],
+  "defaultConfig": {
+    "timeout": 30000,
+    "retries": 3,
+    "headless": true,
+    "viewport": {
+      "width": 1920,
+      "height": 1080
+    }
+  }
+}

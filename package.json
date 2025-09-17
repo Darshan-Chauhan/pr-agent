@@ -1,0 +1,44 @@
+{
+  "name": "pr-agent",
+  "version": "1.0.0",
+  "description": "PR-Aware Exploration Agent - AI-assisted developer productivity & quality tool",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node dev-run.js",
+    "dev:test": "DRY_RUN=false HEADLESS=false node dev-run.js",
+    "dev:test:clean": "DRY_RUN=false HEADLESS=false CLEAN_ARTIFACTS=true node dev-run.js",
+    "dev:dry": "DRY_RUN=true node dev-run.js",
+    "run": "node index.js run",
+    "pr": "node index.js run --pr",
+    "dry": "node index.js run --dry-run --pr",
+    "test": "node --test src/**/*.test.js",
+    "setup": "npx playwright install && node src/setup.js",
+    "install-browsers": "npx playwright install"
+  },
+  "keywords": [
+    "pr",
+    "testing",
+    "automation",
+    "ai",
+    "playwright",
+    "exploration"
+  ],
+  "author": "LazyDevs",
+  "license": "MIT",
+  "dependencies": {
+    "@octokit/rest": "^22.0.0",
+    "@playwright/test": "^1.55.0",
+    "axios": "^1.12.1",
+    "chalk": "^5.6.2",
+    "cli-progress": "^3.12.0",
+    "commander": "^14.0.1",
+    "dotenv": "^17.2.2",
+    "inquirer": "^12.9.4",
+    "node-fetch": "^3.3.2",
+    "playwright": "^1.55.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
