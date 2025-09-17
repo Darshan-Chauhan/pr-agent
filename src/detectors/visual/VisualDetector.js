@@ -1,9 +1,11 @@
 import chalk from "chalk";
 import fs from "fs/promises";
 import path from "path";
+import VisualUtils from "../../utils/VisualUtils.js";
+import pa11y from "pa11y";
 
 /**
- * Detects visual regression issues, layout shifts, and rendering problems
+ * Enhanced Visual Detector with pixel-perfect regression testing and accessibility checks
  */
 export class VisualDetector {
   constructor(options = {}) {
@@ -11,16 +13,35 @@ export class VisualDetector {
       clsThreshold: 0.1, // Cumulative Layout Shift
       renderTimeMs: 3000,
       viewportConsistency: 0.95,
+      visualRegressionThreshold: 1.0, // 1% pixel difference threshold
+      accessibilityErrorThreshold: 0, // No accessibility errors allowed
     };
+
+    this.visualUtils = new VisualUtils({
+      threshold: this.threshold.visualRegressionThreshold / 100,
+      baselineDir: options.baselineDir || "artifacts/baselines",
+    });
+
+    this.visualRegressionEnabled = options.enableVisualRegression !== false;
+    this.accessibilityEnabled = options.enableAccessibility !== false;
+    this.advancedScreenshots = options.enableAdvancedScreenshots !== false;
+    this.realLayoutShiftDetection = options.enableRealLayoutShifts !== false;
+
+    // Enhanced monitoring data
+    this.visualRegressionResults = [];
+    this.accessibilityResults = null;
+    this.realLayoutShifts = [];
   }
 
   /**
-   * Analyze visual aspects from execution results
+   * Enhanced visual analysis with regression testing and accessibility checks
    * @param {object} executionResults - Results from PlaywrightRunner
-   * @returns {object} - Visual analysis results
+   * @returns {object} - Comprehensive visual analysis results
    */
   async analyze(executionResults) {
-    console.log(chalk.blue("👁️  Analyzing visual rendering..."));
+    console.log(
+      chalk.blue("👁️  Analyzing visual rendering with enhanced tools...")
+    );
 
     const analysis = {
       detector: "visual",
@@ -31,12 +52,19 @@ export class VisualDetector {
         layoutShifts: 0,
         viewportTests: 0,
         estimatedCLS: 0,
+        visualRegressions: 0,
+        accessibilityIssues: 0,
+        realLayoutShifts: 0,
       },
       issues: [],
       recommendations: [],
       screenshots: [],
       renderingMetrics: {},
       layoutAnalysis: {},
+      visualRegressionResults: [],
+      accessibilityReport: null,
+      realLayoutShiftData: [],
+      advancedScreenshots: [],
     };
 
     // Collect all visual artifacts from execution steps
@@ -59,6 +87,39 @@ export class VisualDetector {
       if (step.data && step.data.performance) {
         this.analyzeVisualPerformance(step.data.performance, analysis);
       }
+    }
+
+    // Enhanced screenshot analysis with advanced capabilities
+    if (this.advancedScreenshots && analysis.screenshots.length > 0) {
+      analysis.advancedScreenshots =
+        await this.performAdvancedScreenshotAnalysis(analysis.screenshots);
+    }
+
+    // Visual regression testing
+    if (this.visualRegressionEnabled && executionResults.url) {
+      analysis.visualRegressionResults =
+        await this.performVisualRegressionTesting(
+          executionResults.url,
+          analysis.screenshots
+        );
+      analysis.summary.visualRegressions =
+        analysis.visualRegressionResults.filter((r) => !r.passed).length;
+    }
+
+    // Real layout shift detection
+    if (this.realLayoutShiftDetection && executionResults.page) {
+      analysis.realLayoutShiftData = await this.detectRealLayoutShifts(
+        executionResults.page
+      );
+      analysis.summary.realLayoutShifts = analysis.realLayoutShiftData.length;
+    }
+
+    // Accessibility analysis for visual elements
+    if (this.accessibilityEnabled && executionResults.url) {
+      analysis.accessibilityReport =
+        await this.performVisualAccessibilityAnalysis(executionResults.url);
+      analysis.summary.accessibilityIssues =
+        analysis.accessibilityReport?.issues?.length || 0;
     }
 
     // Analyze screenshot sequences for visual consistency
@@ -319,6 +380,82 @@ export class VisualDetector {
           "Increase visual testing coverage by capturing more screenshots",
       });
     }
+
+    // Visual regression issues
+    if (analysis.summary.visualRegressions > 0) {
+      analysis.issues.push({
+        id: `visual-regression-${Date.now()}`,
+        severity: "major",
+        type: "visual_regression",
+        title: "Visual Regression Detected",
+        description: `Found ${analysis.summary.visualRegressions} visual regressions compared to baseline`,
+        impact:
+          "High - Visual regressions can break user interface and user experience",
+        evidence: {
+          regressions: analysis.visualRegressionResults.filter(
+            (r) => !r.passed
+          ),
+          threshold: this.threshold.visualRegressionThreshold,
+        },
+        recommendation:
+          "Review visual changes and update baselines if changes are intentional",
+      });
+    }
+
+    // Real layout shift issues
+    if (analysis.summary.realLayoutShifts > 0) {
+      const highSeverityShifts = analysis.realLayoutShiftData.filter(
+        (s) => s.severity === "high"
+      );
+
+      if (highSeverityShifts.length > 0) {
+        analysis.issues.push({
+          id: `real-layout-shifts-${Date.now()}`,
+          severity: "major",
+          type: "high_layout_shifts",
+          title: "High Cumulative Layout Shift (Real Measurement)",
+          description: `Detected ${highSeverityShifts.length} high-severity layout shifts with real CLS measurement`,
+          impact:
+            "High - Real layout shifts significantly impact user experience and Core Web Vitals",
+          evidence: {
+            highSeverityShifts: highSeverityShifts.length,
+            totalShifts: analysis.summary.realLayoutShifts,
+            shifts: analysis.realLayoutShiftData,
+          },
+          recommendation:
+            "Identify and fix elements causing layout instability",
+        });
+      }
+    }
+
+    // Accessibility issues
+    if (analysis.summary.accessibilityIssues > 0) {
+      const accessibilityReport = analysis.accessibilityReport;
+      const highSeverityIssues = accessibilityReport?.categorized
+        ? Object.values(accessibilityReport.categorized)
+            .flat()
+            .filter((issue) => issue.severity === "high").length
+        : 0;
+
+      if (highSeverityIssues > 0) {
+        analysis.issues.push({
+          id: `accessibility-violations-${Date.now()}`,
+          severity: "major",
+          type: "accessibility_violations",
+          title: "Accessibility Violations Detected",
+          description: `Found ${highSeverityIssues} high-severity accessibility issues affecting WCAG 2.1 AA compliance`,
+          impact:
+            "High - Accessibility violations prevent users with disabilities from using the application",
+          evidence: {
+            totalIssues: analysis.summary.accessibilityIssues,
+            highSeverityIssues,
+            categorized: accessibilityReport?.categorized,
+          },
+          recommendation:
+            "Fix accessibility violations to ensure inclusive user experience",
+        });
+      }
+    }
   }
 
   /**
@@ -403,7 +540,263 @@ export class VisualDetector {
         "render_performance_analysis",
         "viewport_consistency_testing",
         "screenshot_comparison",
+        "visual_regression_testing",
+        "accessibility_analysis",
+        "advanced_screenshots",
+        "real_layout_shift_detection",
       ],
     };
+  }
+
+  /**
+   * Perform advanced screenshot analysis with VisualUtils
+   */
+  async performAdvancedScreenshotAnalysis(screenshots) {
+    const results = [];
+
+    for (const screenshot of screenshots) {
+      try {
+        const advancedData = await this.visualUtils.takeAdvancedScreenshot(
+          screenshot.path,
+          {
+            includeViewportInfo: true,
+            includeDimensions: true,
+            quality: 90,
+          }
+        );
+
+        results.push({
+          original: screenshot,
+          enhanced: advancedData,
+          analysisTimestamp: new Date().toISOString(),
+        });
+      } catch (error) {
+        console.log(
+          chalk.yellow(
+            `Could not enhance screenshot analysis: ${error.message}`
+          )
+        );
+        results.push({
+          original: screenshot,
+          error: error.message,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Perform visual regression testing using VisualUtils
+   */
+  async performVisualRegressionTesting(url, screenshots) {
+    const results = [];
+
+    for (const screenshot of screenshots) {
+      try {
+        // Perform visual regression test
+        const regressionResult =
+          await this.visualUtils.performVisualRegressionTest(
+            screenshot.path,
+            `baseline_${screenshot.filename}`, // baseline path
+            {
+              threshold: this.threshold.visualRegressionThreshold,
+              includeAA: true,
+              alpha: 0.1,
+            }
+          );
+
+        results.push({
+          screenshot: screenshot.filename,
+          stepDescription: screenshot.stepDescription,
+          passed: regressionResult.match,
+          difference: regressionResult.difference,
+          diffImage: regressionResult.diffPath,
+          timestamp: new Date().toISOString(),
+        });
+
+        if (!regressionResult.match) {
+          console.log(
+            chalk.yellow(`Visual regression detected in ${screenshot.filename}`)
+          );
+        }
+      } catch (error) {
+        console.log(
+          chalk.yellow(`Visual regression test failed: ${error.message}`)
+        );
+        results.push({
+          screenshot: screenshot.filename,
+          error: error.message,
+          passed: false,
+        });
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Detect real layout shifts using browser APIs
+   */
+  async detectRealLayoutShifts(page) {
+    try {
+      // Inject layout shift detection script
+      const layoutShifts = await page.evaluate(() => {
+        return new Promise((resolve) => {
+          const shifts = [];
+
+          // Use Layout Instability API if available
+          if ("LayoutShift" in window) {
+            const observer = new PerformanceObserver((list) => {
+              for (const entry of list.getEntries()) {
+                if (
+                  entry.entryType === "layout-shift" &&
+                  !entry.hadRecentInput
+                ) {
+                  shifts.push({
+                    value: entry.value,
+                    startTime: entry.startTime,
+                    sources:
+                      entry.sources?.map((source) => ({
+                        node: source.node?.tagName,
+                        currentRect: source.currentRect,
+                        previousRect: source.previousRect,
+                      })) || [],
+                  });
+                }
+              }
+            });
+
+            observer.observe({ type: "layout-shift", buffered: true });
+
+            // Resolve after a short delay to collect existing shifts
+            setTimeout(() => {
+              observer.disconnect();
+              resolve(shifts);
+            }, 1000);
+          } else {
+            resolve([]);
+          }
+        });
+      });
+
+      return layoutShifts.map((shift) => ({
+        ...shift,
+        severity:
+          shift.value > 0.25 ? "high" : shift.value > 0.1 ? "medium" : "low",
+        timestamp: new Date().toISOString(),
+      }));
+    } catch (error) {
+      console.log(
+        chalk.yellow(`Could not detect real layout shifts: ${error.message}`)
+      );
+      return [];
+    }
+  }
+
+  /**
+   * Perform visual accessibility analysis using pa11y
+   */
+  async performVisualAccessibilityAnalysis(url) {
+    try {
+      const results = await pa11y(url, {
+        standard: "WCAG2AA",
+        runners: ["axe", "htmlcs"],
+        includeNotices: false,
+        includeWarnings: true,
+        chromeLaunchConfig: {
+          args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        },
+        actions: [
+          "wait for element body to be visible",
+          "screen capture screenshots/accessibility-test.png",
+        ],
+      });
+
+      // Categorize issues by type and severity
+      const categorizedIssues = {
+        colorContrast: [],
+        focusManagement: [],
+        semanticStructure: [],
+        imageAlt: [],
+        other: [],
+      };
+
+      for (const issue of results.issues) {
+        const category = this.categorizeAccessibilityIssue(issue);
+        categorizedIssues[category].push({
+          type: issue.type,
+          code: issue.code,
+          message: issue.message,
+          selector: issue.selector,
+          context: issue.context,
+          severity: this.mapAccessibilitySeverity(issue.type),
+        });
+      }
+
+      return {
+        url,
+        totalIssues: results.issues.length,
+        issues: results.issues,
+        categorized: categorizedIssues,
+        screenshot: "screenshots/accessibility-test.png",
+        timestamp: new Date().toISOString(),
+      };
+    } catch (error) {
+      console.log(
+        chalk.yellow(`Accessibility analysis failed: ${error.message}`)
+      );
+      return {
+        error: error.message,
+        timestamp: new Date().toISOString(),
+      };
+    }
+  }
+
+  /**
+   * Categorize accessibility issue by type
+   */
+  categorizeAccessibilityIssue(issue) {
+    const code = issue.code.toLowerCase();
+
+    if (code.includes("color") || code.includes("contrast")) {
+      return "colorContrast";
+    } else if (
+      code.includes("focus") ||
+      code.includes("keyboard") ||
+      code.includes("tab")
+    ) {
+      return "focusManagement";
+    } else if (
+      code.includes("heading") ||
+      code.includes("landmark") ||
+      code.includes("structure")
+    ) {
+      return "semanticStructure";
+    } else if (
+      code.includes("img") ||
+      code.includes("alt") ||
+      code.includes("image")
+    ) {
+      return "imageAlt";
+    }
+
+    return "other";
+  }
+
+  /**
+   * Map accessibility issue type to severity
+   */
+  mapAccessibilitySeverity(type) {
+    switch (type) {
+      case "error":
+        return "high";
+      case "warning":
+        return "medium";
+      case "notice":
+        return "low";
+      default:
+        return "medium";
+    }
   }
 }

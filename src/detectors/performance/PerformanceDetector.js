@@ -1,7 +1,8 @@
 import chalk from "chalk";
+import PerformanceUtils from "../../utils/PerformanceUtils.js";
 
 /**
- * Detects performance issues based on Core Web Vitals and browser metrics
+ * Enhanced Performance Detector with Lighthouse and Web Vitals integration
  */
 export class PerformanceDetector {
   constructor(options = {}) {
@@ -18,16 +19,24 @@ export class PerformanceDetector {
       loadEventMs: 4000,
       memoryUsageMB: 100,
       cpuUsagePercent: 50,
+      performanceScore: 90, // Lighthouse performance score
+      longTaskMs: 50, // Long task threshold
     };
+
+    this.performanceUtils = new PerformanceUtils(options);
+    this.lighthouseEnabled = options.enableLighthouse !== false;
+    this.webVitalsEnabled = options.enableWebVitals !== false;
   }
 
   /**
-   * Analyze performance metrics from execution results
+   * Enhanced performance analysis with Lighthouse and Web Vitals
    * @param {object} executionResults - Results from PlaywrightRunner
-   * @returns {object} - Performance analysis results
+   * @returns {object} - Comprehensive performance analysis results
    */
   async analyze(executionResults) {
-    console.log(chalk.blue("⚡ Analyzing performance metrics..."));
+    console.log(
+      chalk.blue("⚡ Analyzing performance metrics with enhanced tools...")
+    );
 
     const analysis = {
       detector: "performance",
@@ -50,25 +59,42 @@ export class PerformanceDetector {
           memoryUsage: null,
           cpuUsage: null,
         },
+        lighthouse: null,
+        webVitals: null,
+        performanceScore: null,
+        budgetCompliance: null,
       },
       issues: [],
       recommendations: [],
       performanceProfile: {},
       stepPerformance: [],
+      lighthouseReport: null,
+      cdpMetrics: null,
+      longTasks: [],
     };
 
     // Collect all performance data from execution steps
     const performanceData = [];
+    let targetUrl = null;
+    let page = null;
 
     for (const step of executionResults.steps) {
+      // Extract target URL from navigation steps
+      if (step.type === "navigate" && step.data && step.data.url) {
+        targetUrl = step.data.url;
+      }
+
+      // Extract page reference if available
+      if (step.data && step.data.page) {
+        page = step.data.page;
+      }
+
       // Check step-level performance data
       if (step.data && step.data.performance) {
         performanceData.push({
           ...step.data.performance,
           stepId: step.stepId,
           stepDescription: step.description,
-          stepType: step.type,
-          executionTime: step.executionTimeMs,
         });
         analysis.summary.totalMeasurements++;
       }
@@ -81,7 +107,6 @@ export class PerformanceDetector {
               ...artifact.data,
               stepId: step.stepId,
               stepDescription: step.description,
-              artifactType: "performance",
             });
             analysis.summary.totalMeasurements++;
           }
@@ -97,6 +122,69 @@ export class PerformanceDetector {
       });
     }
 
+    // Enhanced performance analysis
+    if (targetUrl && this.lighthouseEnabled) {
+      try {
+        console.log(chalk.blue("🚀 Running Lighthouse audit..."));
+        analysis.lighthouseReport =
+          await this.performanceUtils.runLighthouseAudit(targetUrl);
+        analysis.summary.lighthouse =
+          this.performanceUtils.extractCoreWebVitals(analysis.lighthouseReport);
+        analysis.summary.performanceScore =
+          analysis.summary.lighthouse.performanceScore;
+
+        // Extract Lighthouse recommendations
+        const lighthouseRecommendations =
+          this.performanceUtils.extractRecommendations(
+            analysis.lighthouseReport
+          );
+        analysis.recommendations.push(
+          ...lighthouseRecommendations.map((rec) => ({
+            ...rec,
+            source: "lighthouse",
+            type: "performance_optimization",
+            priority: rec.impact,
+          }))
+        );
+      } catch (error) {
+        console.log(
+          chalk.yellow(`⚠️ Lighthouse audit failed: ${error.message}`)
+        );
+      }
+    }
+
+    // Web Vitals collection (if page is available)
+    if (page && this.webVitalsEnabled) {
+      try {
+        console.log(chalk.blue("📊 Collecting Web Vitals..."));
+        analysis.summary.webVitals =
+          await this.performanceUtils.collectWebVitals(page);
+      } catch (error) {
+        console.log(
+          chalk.yellow(`⚠️ Web Vitals collection failed: ${error.message}`)
+        );
+      }
+    }
+
+    // CDP metrics collection (if page is available)
+    if (page) {
+      try {
+        console.log(chalk.blue("🔧 Collecting CDP metrics..."));
+        const cdpSession = await this.performanceUtils.setupCDPSession(page);
+        analysis.cdpMetrics = await this.performanceUtils.collectCDPMetrics(
+          cdpSession
+        );
+        analysis.longTasks = await this.performanceUtils.monitorLongTasks(
+          cdpSession
+        );
+        await cdpSession.detach();
+      } catch (error) {
+        console.log(
+          chalk.yellow(`⚠️ CDP metrics collection failed: ${error.message}`)
+        );
+      }
+    }
+
     // Analyze collected performance data
     if (performanceData.length > 0) {
       this.analyzeCoreWebVitals(performanceData, analysis);
@@ -104,7 +192,24 @@ export class PerformanceDetector {
       this.analyzeStepPerformance(analysis);
     }
 
-    // Generate issues based on analysis
+    // Enhanced analysis with Lighthouse data
+    if (analysis.summary.lighthouse) {
+      this.analyzeLighthouseResults(analysis);
+    }
+
+    // Memory and CPU analysis from CDP
+    if (analysis.cdpMetrics) {
+      this.analyzeCDPMetrics(analysis);
+    }
+
+    // Performance budget compliance
+    if (analysis.summary.lighthouse || analysis.summary.webVitals) {
+      analysis.summary.budgetCompliance =
+        this.performanceUtils.calculateBudgetCompliance(
+          analysis.summary.lighthouse || analysis.summary.webVitals,
+          this.threshold
+        );
+    } // Generate issues based on analysis
     this.generateIssues(analysis);
 
     // Generate recommendations
@@ -472,6 +577,264 @@ export class PerformanceDetector {
         impact:
           "Improves perceived performance even with slower actual load times",
       });
+    }
+  }
+
+  /**
+   * Analyze Lighthouse results for performance issues
+   */
+  analyzeLighthouseResults(analysis) {
+    const lighthouse = analysis.summary.lighthouse;
+
+    // Performance score issues
+    if (lighthouse.performanceScore < this.threshold.performanceScore) {
+      analysis.issues.push({
+        id: `performance-lighthouse-score-${Date.now()}`,
+        severity:
+          lighthouse.performanceScore < 50
+            ? "critical"
+            : lighthouse.performanceScore < 75
+            ? "major"
+            : "minor",
+        type: "low_lighthouse_score",
+        title: "Low Lighthouse Performance Score",
+        description: `Lighthouse performance score of ${lighthouse.performanceScore} is below threshold of ${this.threshold.performanceScore}`,
+        impact: "High - Low Lighthouse scores indicate poor user experience",
+        evidence: {
+          score: lighthouse.performanceScore,
+          threshold: this.threshold.performanceScore,
+          metrics: lighthouse,
+        },
+        recommendation:
+          "Review Lighthouse audit recommendations and optimize critical performance metrics",
+      });
+    }
+
+    // Real FCP issues
+    if (lighthouse.fcp.value > this.threshold.fcpMs) {
+      analysis.issues.push({
+        id: `performance-lighthouse-fcp-${Date.now()}`,
+        severity:
+          lighthouse.fcp.value > this.threshold.fcpMs * 2
+            ? "critical"
+            : "major",
+        type: "slow_first_contentful_paint_real",
+        title: "Slow First Contentful Paint (Lighthouse)",
+        description: `Real FCP of ${lighthouse.fcp.displayValue} exceeds threshold of ${this.threshold.fcpMs}ms`,
+        impact: "High - Slow FCP impacts perceived loading performance",
+        evidence: {
+          value: lighthouse.fcp.value,
+          threshold: this.threshold.fcpMs,
+          score: lighthouse.fcp.score,
+          displayValue: lighthouse.fcp.displayValue,
+        },
+        recommendation:
+          "Optimize critical rendering path and reduce render-blocking resources",
+      });
+    }
+
+    // Real LCP issues
+    if (lighthouse.lcp.value > this.threshold.lcpMs) {
+      analysis.issues.push({
+        id: `performance-lighthouse-lcp-${Date.now()}`,
+        severity:
+          lighthouse.lcp.value > this.threshold.lcpMs * 2
+            ? "critical"
+            : "major",
+        type: "slow_largest_contentful_paint_real",
+        title: "Slow Largest Contentful Paint (Lighthouse)",
+        description: `Real LCP of ${lighthouse.lcp.displayValue} exceeds threshold of ${this.threshold.lcpMs}ms`,
+        impact:
+          "High - Slow LCP indicates poor loading performance for main content",
+        evidence: {
+          value: lighthouse.lcp.value,
+          threshold: this.threshold.lcpMs,
+          score: lighthouse.lcp.score,
+          displayValue: lighthouse.lcp.displayValue,
+        },
+        recommendation:
+          "Optimize images, fonts, and critical resources for faster loading",
+      });
+    }
+
+    // Real CLS issues
+    if (lighthouse.cls.value > this.threshold.clsScore) {
+      analysis.issues.push({
+        id: `performance-lighthouse-cls-${Date.now()}`,
+        severity:
+          lighthouse.cls.value > this.threshold.clsScore * 2
+            ? "major"
+            : "minor",
+        type: "high_cumulative_layout_shift_real",
+        title: "High Cumulative Layout Shift (Lighthouse)",
+        description: `Real CLS score of ${lighthouse.cls.displayValue} exceeds threshold of ${this.threshold.clsScore}`,
+        impact: "Medium - Layout shifts create poor user experience",
+        evidence: {
+          value: lighthouse.cls.value,
+          threshold: this.threshold.clsScore,
+          score: lighthouse.cls.score,
+          displayValue: lighthouse.cls.displayValue,
+        },
+        recommendation:
+          "Ensure elements have reserved space and avoid inserting content above existing elements",
+      });
+    }
+  }
+
+  /**
+   * Analyze CDP metrics for advanced performance insights
+   */
+  analyzeCDPMetrics(analysis) {
+    if (!analysis.cdpMetrics) return;
+
+    const { timing, memory } = analysis.cdpMetrics;
+
+    // Memory usage analysis
+    if (memory && memory.used) {
+      const memoryUsageMB = memory.used / (1024 * 1024);
+
+      if (memoryUsageMB > this.threshold.memoryUsageMB) {
+        analysis.issues.push({
+          id: `performance-high-memory-${Date.now()}`,
+          severity:
+            memoryUsageMB > this.threshold.memoryUsageMB * 2
+              ? "major"
+              : "minor",
+          type: "high_memory_usage",
+          title: "High Memory Usage",
+          description: `Memory usage of ${memoryUsageMB.toFixed(
+            2
+          )}MB exceeds threshold of ${this.threshold.memoryUsageMB}MB`,
+          impact:
+            "Medium - High memory usage can cause performance issues and crashes",
+          evidence: {
+            used: memoryUsageMB,
+            total: memory.total / (1024 * 1024),
+            limit: memory.limit / (1024 * 1024),
+            threshold: this.threshold.memoryUsageMB,
+          },
+          recommendation:
+            "Optimize memory usage by reducing DOM nodes, cleaning up event listeners, and managing object references",
+        });
+      }
+
+      // Memory leak detection
+      if (memory.used > memory.total * 0.8) {
+        analysis.issues.push({
+          id: `performance-memory-leak-${Date.now()}`,
+          severity: "major",
+          type: "potential_memory_leak",
+          title: "Potential Memory Leak",
+          description: `Memory usage is ${(
+            (memory.used / memory.total) *
+            100
+          ).toFixed(1)}% of total heap`,
+          impact: "High - Memory leaks can cause application crashes",
+          evidence: {
+            usage: (memory.used / memory.total) * 100,
+            used: memory.used,
+            total: memory.total,
+          },
+          recommendation:
+            "Investigate potential memory leaks and optimize memory management",
+        });
+      }
+    }
+
+    // Long tasks analysis
+    if (analysis.longTasks && analysis.longTasks.length > 0) {
+      analysis.issues.push({
+        id: `performance-long-tasks-${Date.now()}`,
+        severity: analysis.longTasks.length > 5 ? "major" : "minor",
+        type: "long_tasks_detected",
+        title: "Long Tasks Detected",
+        description: `Found ${analysis.longTasks.length} long tasks that may block the main thread`,
+        impact:
+          "Medium - Long tasks can cause poor user experience and janky interactions",
+        evidence: {
+          taskCount: analysis.longTasks.length,
+          tasks: analysis.longTasks.slice(0, 3), // Show first 3 tasks
+        },
+        recommendation:
+          "Break up long-running JavaScript tasks and optimize code execution",
+      });
+    }
+
+    // Performance timing analysis
+    if (timing) {
+      // DOM nodes analysis
+      if (timing.domNodes && timing.domNodes > 1500) {
+        analysis.issues.push({
+          id: `performance-dom-complexity-${Date.now()}`,
+          severity: timing.domNodes > 3000 ? "major" : "minor",
+          type: "high_dom_complexity",
+          title: "High DOM Complexity",
+          description: `Page has ${timing.domNodes} DOM nodes, which may impact performance`,
+          impact:
+            "Medium - Complex DOM structures can slow down rendering and interactions",
+          evidence: {
+            domNodes: timing.domNodes,
+            threshold: 1500,
+          },
+          recommendation:
+            "Reduce DOM complexity and consider virtual scrolling for large lists",
+        });
+      }
+
+      // Layout and style recalculations
+      if (timing.layoutCount && timing.layoutCount > 10) {
+        analysis.issues.push({
+          id: `performance-layout-thrashing-${Date.now()}`,
+          severity: "minor",
+          type: "layout_thrashing",
+          title: "Excessive Layout Recalculations",
+          description: `Page triggered ${timing.layoutCount} layout recalculations`,
+          impact: "Medium - Excessive layouts can cause performance issues",
+          evidence: {
+            layoutCount: timing.layoutCount,
+            threshold: 10,
+          },
+          recommendation:
+            "Optimize CSS and JavaScript to reduce layout thrashing",
+        });
+      }
+    }
+  }
+
+  /**
+   * Enhanced performance budget compliance analysis
+   */
+  analyzePerformanceBudget(analysis) {
+    if (!analysis.summary.budgetCompliance) return;
+
+    const failedBudgets = Object.entries(
+      analysis.summary.budgetCompliance
+    ).filter(([, budget]) => !budget.passed);
+
+    if (failedBudgets.length > 0) {
+      for (const [metric, budget] of failedBudgets) {
+        analysis.issues.push({
+          id: `performance-budget-${metric}-${Date.now()}`,
+          severity:
+            Math.abs(budget.difference) > budget.threshold * 0.5
+              ? "major"
+              : "minor",
+          type: "performance_budget_violation",
+          title: `Performance Budget Violation: ${metric.toUpperCase()}`,
+          description: `${metric.toUpperCase()} of ${
+            budget.value
+          } violates budget of ${budget.threshold}`,
+          impact:
+            "Medium - Performance budget violations indicate degraded user experience",
+          evidence: {
+            metric,
+            actual: budget.value,
+            budget: budget.threshold,
+            difference: budget.difference,
+          },
+          recommendation: `Optimize ${metric} to meet performance budget requirements`,
+        });
+      }
     }
   }
 

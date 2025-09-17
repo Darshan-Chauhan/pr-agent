@@ -8,6 +8,8 @@ import { AIContextManager } from "../ai/AIContextManager.js";
 import { AIRouteDiscovery } from "../ai/AIRouteDiscovery.js";
 import { AIStepGenerator } from "../ai/AIStepGenerator.js";
 import { OllamaClient } from "../ai/OllamaClient.js";
+import PerformanceUtils from "../utils/PerformanceUtils.js";
+import VisualUtils from "../utils/VisualUtils.js";
 
 /**
  * Executes exploration plans using Playwright browser automation
@@ -47,6 +49,24 @@ export class PlaywrightRunner {
       ollamaUrl: this.ollamaUrl,
       model: this.model,
     });
+
+    // Initialize performance monitoring utilities
+    this.performanceUtils = new PerformanceUtils({
+      lighthouseEnabled: options.lighthouseEnabled !== false,
+      cdpEnabled: options.cdpEnabled !== false,
+      webVitalsEnabled: options.webVitalsEnabled !== false,
+    });
+
+    this.visualUtils = new VisualUtils({
+      pixelmatchEnabled: options.pixelmatchEnabled !== false,
+      sharpEnabled: options.sharpEnabled !== false,
+    });
+
+    // Performance and monitoring state
+    this.cdpSession = null;
+    this.networkRequests = [];
+    this.consoleMessages = [];
+    this.performanceEntries = [];
   }
 
   /**
@@ -126,6 +146,19 @@ export class PlaywrightRunner {
       // Capture final performance metrics
       results.performance = await this.capturePerformanceMetrics();
 
+      // Add enhanced execution data for detectors
+      results.url = this.page ? this.page.url() : null;
+      results.page = this.page;
+      results.cdpSession = this.cdpSession;
+      results.networkRequests = [...this.networkRequests];
+      results.consoleMessages = [...this.consoleMessages];
+      results.performanceEntries = [...this.performanceEntries];
+      results.executionLog = [...this.executionLog];
+
+      // Add utility instances for detectors
+      results.performanceUtils = this.performanceUtils;
+      results.visualUtils = this.visualUtils;
+
       const endTime = Date.now();
       results.endTime = new Date().toISOString();
       results.executionTimeMs = endTime - this.startTime;
@@ -136,6 +169,11 @@ export class PlaywrightRunner {
       console.log(
         chalk.cyan(
           `📊 Results: ${results.successfulSteps} success, ${results.failedSteps} failed, ${results.skippedSteps} skipped`
+        )
+      );
+      console.log(
+        chalk.gray(
+          `   📊 Enhanced data: ${results.networkRequests.length} network requests, ${results.consoleMessages.length} console messages`
         )
       );
 
@@ -840,6 +878,12 @@ export class PlaywrightRunner {
     this.page.setDefaultTimeout(this.timeout);
     this.page.setDefaultNavigationTimeout(this.timeout);
 
+    // Setup CDP session for enhanced monitoring
+    await this.setupCDPSession();
+
+    // Setup enhanced monitoring
+    await this.setupEnhancedMonitoring();
+
     // Connect AI services to the page
     this.aiRouteDiscovery.page = this.page;
   }
@@ -919,7 +963,8 @@ export class PlaywrightRunner {
    */
   async capturePerformanceMetrics() {
     try {
-      const metrics = await this.page.evaluate(() => {
+      // Basic navigation metrics (existing functionality)
+      const basicMetrics = await this.page.evaluate(() => {
         const perf = performance.getEntriesByType("navigation")[0];
         return {
           loadTime: perf.loadEventEnd - perf.loadEventStart,
@@ -931,7 +976,32 @@ export class PlaywrightRunner {
         };
       });
 
-      return metrics;
+      // Enhanced metrics using PerformanceUtils
+      let enhancedMetrics = { ...basicMetrics };
+
+      if (this.cdpSession && this.performanceUtils) {
+        try {
+          const cdpMetrics = await this.performanceUtils.collectCDPMetrics(
+            this.cdpSession
+          );
+          enhancedMetrics = {
+            ...enhancedMetrics,
+            ...cdpMetrics,
+            enhanced: true,
+          };
+        } catch (error) {
+          console.log(
+            chalk.yellow(`Could not collect enhanced metrics: ${error.message}`)
+          );
+        }
+      }
+
+      // Add collected network and console data
+      enhancedMetrics.networkRequests = this.networkRequests.length;
+      enhancedMetrics.consoleMessages = this.consoleMessages.length;
+      enhancedMetrics.performanceEntries = this.performanceEntries.length;
+
+      return enhancedMetrics;
     } catch (error) {
       console.error(chalk.red("Performance capture failed:", error.message));
       return null;
@@ -2046,6 +2116,30 @@ If no suitable element is found, set shouldClick to false.`;
    */
   async cleanup() {
     try {
+      // Clean up CDP session
+      if (this.cdpSession) {
+        try {
+          await this.cdpSession.detach();
+          console.log(chalk.gray("   ✅ CDP session cleaned up"));
+        } catch (error) {
+          console.log(
+            chalk.yellow(`CDP session cleanup warning: ${error.message}`)
+          );
+        }
+        this.cdpSession = null;
+      }
+
+      // Clean up performance utils
+      if (this.performanceUtils) {
+        try {
+          await this.performanceUtils.cleanup();
+        } catch (error) {
+          console.log(
+            chalk.yellow(`Performance utils cleanup warning: ${error.message}`)
+          );
+        }
+      }
+
       if (this.page) {
         await this.page.close();
       }
@@ -2055,6 +2149,13 @@ If no suitable element is found, set shouldClick to false.`;
       if (this.browser) {
         await this.browser.close();
       }
+
+      // Clear monitoring data
+      this.networkRequests = [];
+      this.consoleMessages = [];
+      this.performanceEntries = [];
+
+      console.log(chalk.gray("   ✅ Browser cleanup completed"));
     } catch (error) {
       console.error(chalk.red("Cleanup failed:", error.message));
     }
@@ -2706,6 +2807,176 @@ Respond in JSON format:
         );
       }
     }
+  }
+
+  /**
+   * Setup CDP session for enhanced monitoring
+   */
+  async setupCDPSession() {
+    try {
+      // Try different CDP session creation methods based on Playwright version
+      let cdpSession = null;
+      
+      // Method 1: Browser-level CDP session
+      try {
+        const browser = this.page.context().browser();
+        if (browser && typeof browser.newBrowserCDPSession === 'function') {
+          cdpSession = await browser.newBrowserCDPSession();
+        }
+      } catch (e) {
+        // Ignore and try next method
+      }
+      
+      // Method 2: Page-level CDP session  
+      if (!cdpSession) {
+        try {
+          if (typeof this.page.createCDPSession === 'function') {
+            cdpSession = await this.page.createCDPSession();
+          }
+        } catch (e) {
+          // Ignore and try next method
+        }
+      }
+      
+      // Method 3: Context-level CDP session
+      if (!cdpSession) {
+        try {
+          if (typeof this.context.newCDPSession === 'function') {
+            cdpSession = await this.context.newCDPSession(this.page);
+          }
+        } catch (e) {
+          // Ignore - CDP not available
+        }
+      }
+
+      this.cdpSession = cdpSession;
+
+      // Setup CDP session in PerformanceUtils if available
+      if (this.cdpSession && this.performanceUtils.setupCDPSession) {
+        await this.performanceUtils.setupCDPSession(this.cdpSession);
+        console.log(
+          chalk.gray("   ✅ CDP session established for enhanced monitoring")
+        );
+      } else {
+        console.log(
+          chalk.gray("   📝 CDP session not available - using Playwright APIs for monitoring")
+        );
+      }
+    } catch (error) {
+      console.log(
+        chalk.yellow(`Could not setup CDP session: ${error.message}`)
+      );
+      this.cdpSession = null;
+    }
+  }
+
+  /**
+   * Setup enhanced monitoring for console, network, and performance
+   */
+  async setupEnhancedMonitoring() {
+    // Enhanced console monitoring
+    this.page.on("console", (msg) => {
+      const consoleEntry = {
+        type: "console",
+        level: msg.type(),
+        text: msg.text(),
+        args: msg.args().map((arg) => arg.toString()),
+        location: msg.location(),
+        timestamp: Date.now(),
+      };
+
+      this.consoleMessages.push(consoleEntry);
+      this.executionLog.push(consoleEntry);
+    });
+
+    // Enhanced request monitoring
+    this.page.on("request", (request) => {
+      const requestEntry = {
+        type: "request",
+        url: request.url(),
+        method: request.method(),
+        headers: request.headers(),
+        postData: request.postData(),
+        resourceType: request.resourceType(),
+        timestamp: Date.now(),
+      };
+
+      this.networkRequests.push(requestEntry);
+      this.executionLog.push({
+        type: "request",
+        url: request.url(),
+        method: request.method(),
+        timestamp: Date.now(),
+      });
+    });
+
+    // Enhanced response monitoring
+    this.page.on("response", (response) => {
+      const responseEntry = {
+        type: "response",
+        url: response.url(),
+        status: response.status(),
+        statusText: response.statusText(),
+        headers: response.headers(),
+        size: response.headers()["content-length"] || 0,
+        timing: response.request().timing(),
+        timestamp: Date.now(),
+      };
+
+      // Update corresponding request with response data
+      const requestIndex = this.networkRequests.findIndex(
+        (req) => req.url === response.url() && req.type === "request"
+      );
+
+      if (requestIndex !== -1) {
+        this.networkRequests[requestIndex].response = responseEntry;
+      } else {
+        this.networkRequests.push(responseEntry);
+      }
+
+      this.executionLog.push({
+        type: "response",
+        url: response.url(),
+        status: response.status(),
+        timestamp: Date.now(),
+      });
+    });
+
+    // Performance entry monitoring
+    this.page.on("console", async (msg) => {
+      if (msg.type() === "log" && msg.text().includes("performance-entry")) {
+        try {
+          const perfData = JSON.parse(
+            msg.text().replace("performance-entry:", "")
+          );
+          this.performanceEntries.push({
+            ...perfData,
+            timestamp: Date.now(),
+          });
+        } catch (error) {
+          // Ignore parsing errors for non-performance console messages
+        }
+      }
+    });
+
+    console.log(chalk.gray("   ✅ Enhanced monitoring setup completed"));
+  }
+
+  /**
+   * Get comprehensive execution data for detectors
+   */
+  getExecutionData() {
+    return {
+      page: this.page,
+      cdpSession: this.cdpSession,
+      networkRequests: this.networkRequests,
+      consoleMessages: this.consoleMessages,
+      performanceEntries: this.performanceEntries,
+      executionLog: this.executionLog,
+      artifacts: this.artifacts,
+      performanceUtils: this.performanceUtils,
+      visualUtils: this.visualUtils,
+    };
   }
 
   /**
